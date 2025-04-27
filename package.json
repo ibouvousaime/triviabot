@@ -13,6 +13,7 @@
     "dotenv": "^16.5.0",
     "grammy": "^1.36.1",
     "mongodb": "^6.16.0",
-    "node-cache": "^5.1.2"
+    "node-cache": "^5.1.2",
+    "node-schedule": "^2.1.1"
   }
 }
