@@ -10,6 +10,7 @@
   "description": "",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.40.0",
+    "csv-parse": "^5.6.0",
     "dotenv": "^16.5.0",
     "grammy": "^1.36.1",
     "mongodb": "^6.16.0",

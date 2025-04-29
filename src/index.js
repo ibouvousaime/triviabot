@@ -46,9 +46,7 @@ async function doTriviaJob(chatId = null) {
 	for (const chat of chats) {
 		if (chatId && chat.chatId !== chatId) continue;
 		sendQuizz(chat.chatId);
-		bot.api.deleteMessage(chat.chatId, chat.warningMessageID).catch((err) => {
-			console.error("Error deleting message:", err);
-		});
+		bot.api.deleteMessage(chat.chatId, chat.warningMessageID).catch((err) => {});
 		/* setTimeout(() => {
 			showLeaderboard(chat.chatId);
 		}, timeToAnswer * 1000); */
@@ -67,9 +65,13 @@ bot.command("trivia", async (ctx) => {
 	}
 });
 
-const warningJob = schedule.scheduleJob("55 */2 * * *", doTheWarning);
+const warningJob = schedule.scheduleJob("55 2,5,8,11,14,17,20,23 * * *", () => {
+	doTheWarning();
+});
 
-const job = schedule.scheduleJob("0 */3 * * *", doTriviaJob);
+const job = schedule.scheduleJob("0 */3 * * *", () => {
+	doTriviaJob();
+});
 
 async function sendQuizz(chatId) {
 	let question;
@@ -88,6 +90,7 @@ async function sendQuizz(chatId) {
 
 	const pollMsg = await bot.api.sendPoll(chatId, question.questionStr, question.options, {
 		type: "quiz",
+		explanation: question.hint,
 		correct_option_id: question.options.findIndex((option) => option === question.answer),
 		//open_period: timeToAnswer,
 		is_anonymous: false,
@@ -124,17 +127,18 @@ async function showLeaderboard(chatId) {
 		.collection("pollScores")
 		.aggregate([
 			{ $match: { chatId } },
-			{ $addFields: { score: { $add: ["$correctAnswers", { $multiply: ["$bonus", pointsPerBonus] }] } } },
+			{ $addFields: { score: { $add: ["$correctAnswers", { $multiply: [{ $ifNull: ["$bonus", 0] }, pointsPerBonus] }] } } },
 			{ $sort: { score: -1 } },
 			{ $limit: 10 },
 		])
 		.toArray();
+	console.log(leaderboard);
 	let message = `🏆 <b>Leaderboard</b> 🏆\n <i>1 point per correct answer + each bonus point for giving a quick answer awards ${pointsPerBonus} point.</i> \n\n`;
 	for (let i = 0; i < leaderboard.length; i++) {
 		const user = leaderboard[i];
 		message +=
 			`<b>${i + 1}.</b> ${user.first_name} ${user.last_name || ""} — <b>Score:</b> ${user.score || 0} ` +
-			`(✅ Correct: ${user.correctAnswers} | ⚡ Bonus: ${user.bonus})\n`;
+			`(✅ Correct: ${user.correctAnswers || 0} | ⚡ Bonus: ${user.bonus || 0})\n`;
 	}
 	bot.api.sendMessage(chatId, message, { parse_mode: "HTML" });
 }
@@ -151,7 +155,6 @@ bot.command("warnme", async (ctx) => {
 		return;
 	} else if (ctx.chat.type === "group" || ctx.chat.type === "supergroup") {
 		const chat = await db.collection("chats").findOne({ chatId });
-		console.log(chat);
 		if (chat) {
 			chat.users = chat.users || [];
 		}
