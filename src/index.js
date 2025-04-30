@@ -8,7 +8,7 @@ const NodeCache = require("node-cache");
 const schedule = require("node-schedule");
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN);
 
-const timeToAnswer = 300; 
+const timeToAnswer = 300;
 const myCache = new NodeCache();
 const pointsPerBonus = 1;
 bot.command("start", async (ctx) => {
@@ -156,18 +156,19 @@ async function showLeaderboard(chatId) {
 		.collection("pollScores")
 		.aggregate([
 			{ $match: { chatId } },
-			{ $addFields: { score: { $add: ["$correctAnswers", { $multiply: [{ $ifNull: ["$bonus", 0] }, pointsPerBonus] }] } } },
+			{ $addFields: { deduction: { $floor: { $divide: [{ $add: ["$correctAnswers", "$wrongAnswers"] }, 15] } } } },
+			{ $addFields: { score: { $subtract: ["$correctAnswers", "$deduction"] } } },
 			{ $sort: { score: -1 } },
 			{ $limit: 10 },
 		])
 		.toArray();
 	console.log(leaderboard);
-	let message = `🏆 <b>Leaderboard</b> 🏆\n <i>1 point per correct answer + each bonus point for giving a quick answer awards ${pointsPerBonus} point.</i> \n\n`;
+	let message = `🏆 <b>Leaderboard</b> 🏆\n <i>1 point per correct answer (a point deduced for every 15 answers) </i> \n\n`;
 	for (let i = 0; i < leaderboard.length; i++) {
 		const user = leaderboard[i];
 		message +=
 			`<b>${i + 1}.</b> ${user.first_name} ${user.last_name || ""} — <b>Score:</b> ${user.score || 0} ` +
-			`(✅ Correct: ${user.correctAnswers || 0} | ⚡ Bonus: ${user.bonus || 0})\n`;
+			`(Correct: ${user.correctAnswers || 0} | Accuracy penalty: ${user.deduction || 0})\n`;
 	}
 	bot.api.sendMessage(chatId, message, { parse_mode: "HTML" });
 }
