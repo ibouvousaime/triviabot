@@ -1,4 +1,5 @@
 const { sendSimpleRequestToClaude } = require("./claude");
+const { sendSimpleRequestToDeepSeek } = require("./deepseek");
 const MongoDB = require("./mongo");
 
 function sendRandomQuizz(chatId) {
@@ -6,18 +7,19 @@ function sendRandomQuizz(chatId) {
 		const dbInstance = MongoDB.getInstance();
 		await dbInstance.connect("messages");
 		const db = dbInstance.getDb();
-		const mongoCollection = db.collection("trivia");
+		const mongoCollection = db.collection("jeopardy");
 
 		const questionDoc = (await mongoCollection.aggregate([{ $sample: { size: 1 } }]).toArray())[0];
 		questionDoc.Question = (questionDoc.Category ? questionDoc.Category + ": " : "") + questionDoc.Question;
-		sendSimpleRequestToClaude(
-			`You are a trivia expert. Given the following trivia question: "${questionDoc.Question}" and its correct answer: "${questionDoc.Answer}", generate three plausible, SHORT but incorrect answers. Ensure the incorrect answers are distinct, contextually relevant, and not overly similar to the correct answer while respecting the case. Also provide a short explanation that will be shown when the user fails. Reply with a JSON object in the format {"IncorrectAnswers": ["answer1", "answer2", "answer3"], "Explanation": "explanation"}.`
+		sendSimpleRequestToDeepSeek(
+			`You are a trivia expert. Given the following trivia question: "${questionDoc.Question}" and its correct answer: "${questionDoc.Answer}", generate three plausible, SHORT but incorrect answers. Ensure the incorrect answers are distinct, contextually relevant, and not overly similar to the correct answer while respecting the case. Also provide a short explanation (up to 200 characters) that will be shown when the user fails. Reply with a JSON object in the format {"IncorrectAnswers": ["answer1", "answer2", "answer3"], "Explanation": "explanation"}.`,
+			"json_object"
 		)
 			.then(async (response) => {
 				try {
-					const parsedText = JSON.parse(response.content[0].text);
+					const parsedText = JSON.parse(response);
 					const explanation = parsedText.Explanation.trim().slice(0, 200);
-					console.log(explanation);
+					const extractedURLFromQuestion = (questionDoc.Question.match(/href="([^"]+)"/) || [])[1];
 					const answers = parsedText.IncorrectAnswers.map((answer) =>
 						answer
 							.replace(/[^\w\s]/g, "")
@@ -26,16 +28,25 @@ function sendRandomQuizz(chatId) {
 					);
 					questionDoc.IncorrectAnswers = answers;
 					const question = {
-						questionStr: questionDoc.Question.slice(0, 300),
+						questionStr: questionDoc.Question.replace(/<[^>]*>/g, "").slice(0, 300),
 						answer: questionDoc.Answer.replace(/[^\w\s]/g, "")
 							.replace(/^"|"$/g, "")
 							.trim(),
 						hint: explanation,
+						url: extractedURLFromQuestion,
 						options: [questionDoc.Answer, ...questionDoc.IncorrectAnswers],
 					};
-					question.options = question.options.sort(() => Math.random() - 0.5);
+					question.options = question.options
+						.sort(() => Math.random() - 0.5)
+						.map((option) =>
+							option
+								.replace(/[^\w\s]/g, "")
+								.replace(/^"|"$/g, "")
+								.trim()
+						);
 					resolve(question);
 				} catch (err) {
+					console.log(err);
 					reject("claude_error");
 				}
 			})

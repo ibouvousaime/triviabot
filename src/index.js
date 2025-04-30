@@ -8,7 +8,7 @@ const NodeCache = require("node-cache");
 const schedule = require("node-schedule");
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN);
 
-const timeToAnswer = 120;
+const timeToAnswer = 300; 
 const myCache = new NodeCache();
 const pointsPerBonus = 1;
 bot.command("start", async (ctx) => {
@@ -60,7 +60,7 @@ bot.command("warning", async (ctx) => {
 });
 
 bot.command("trivia", async (ctx) => {
-	if (ctx.chat.title.includes("test")) {
+	if (ctx.from.id == process.env.ADMIN_ID) {
 		doTriviaJob(ctx.chat.id);
 	}
 });
@@ -72,6 +72,25 @@ const warningJob = schedule.scheduleJob("55 2,5,8,11,14,17,20,23 * * *", () => {
 const job = schedule.scheduleJob("0 */3 * * *", () => {
 	doTriviaJob();
 });
+
+function fetchURLContent(url) {
+	return new Promise((resolve, reject) => {
+		const https = require("https");
+		https
+			.get(url, (res) => {
+				let data = "";
+				res.on("data", (chunk) => {
+					data += chunk;
+				});
+				res.on("end", () => {
+					resolve(data);
+				});
+			})
+			.on("error", (err) => {
+				reject(err);
+			});
+	});
+}
 
 async function sendQuizz(chatId) {
 	let question;
@@ -87,11 +106,21 @@ async function sendQuizz(chatId) {
 		}
 		attempts++;
 	}
-
+	if (question.url) {
+		let message;
+		const fileExtension = question.url.split(".").pop().toLowerCase();
+		if (["mp4", "mov", "avi", "mkv"].includes(fileExtension)) {
+			message = await bot.api.sendVideo(chatId, question.url);
+		} else if (["jpg", "jpeg", "png", "gif", "bmp"].includes(fileExtension)) {
+			message = await bot.api.sendPhoto(chatId, question.url);
+		}
+		console.log("url", question.url);
+	}
 	const pollMsg = await bot.api.sendPoll(chatId, question.questionStr, question.options, {
 		type: "quiz",
 		explanation: question.hint,
 		correct_option_id: question.options.findIndex((option) => option === question.answer),
+		question_parse_mode: "HTML",
 		//open_period: timeToAnswer,
 		is_anonymous: false,
 	});
