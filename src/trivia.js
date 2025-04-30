@@ -26,8 +26,10 @@ function sendRandomQuizz(chatId) {
 					);
 					questionDoc.IncorrectAnswers = answers;
 					const question = {
-						questionStr: questionDoc.Question,
-						answer: questionDoc.Answer,
+						questionStr: questionDoc.Question.slice(0, 300),
+						answer: questionDoc.Answer.replace(/[^\w\s]/g, "")
+							.replace(/^"|"$/g, "")
+							.trim(),
 						hint: explanation,
 						options: [questionDoc.Answer, ...questionDoc.IncorrectAnswers],
 					};
