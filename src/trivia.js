@@ -20,15 +20,10 @@ function sendRandomQuizz(chatId) {
 					const parsedText = JSON.parse(response);
 					const explanation = parsedText.Explanation.trim().slice(0, 200);
 					const extractedURLFromQuestion = (questionDoc.Question.match(/href="([^"]+)"/) || [])[1];
-					const answers = parsedText.IncorrectAnswers.map((answer) =>
-						answer
-							.replace(/[^\w\s]/g, "")
-							.replace(/^"|"$/g, "")
-							.trim()
-					);
+					const answers = parsedText.IncorrectAnswers.map((answer) => answer.replace(/^"|"$/g, "").trim());
 					questionDoc.IncorrectAnswers = answers;
 					const question = {
-						questionStr: questionDoc.Question.replace(/<[^>]*>/g, "").slice(0, 300),
+						questionStr: questionDoc.Question.replace(/^"|"$/g, "").slice(0, 300),
 						answer: questionDoc.Answer.replace(/[^\w\s]/g, "")
 							.replace(/^"|"$/g, "")
 							.trim(),
@@ -36,14 +31,7 @@ function sendRandomQuizz(chatId) {
 						url: extractedURLFromQuestion,
 						options: [questionDoc.Answer, ...questionDoc.IncorrectAnswers],
 					};
-					question.options = question.options
-						.sort(() => Math.random() - 0.5)
-						.map((option) =>
-							option
-								.replace(/[^\w\s]/g, "")
-								.replace(/^"|"$/g, "")
-								.trim()
-						);
+					question.options = question.options.sort(() => Math.random() - 0.5).map((option) => option.replace(/^"|"$/g, "").replace(/^"|"$/g, "").trim());
 					resolve(question);
 				} catch (err) {
 					console.log(err);

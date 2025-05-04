@@ -65,9 +65,9 @@ bot.command("trivia", async (ctx) => {
 	}
 });
 
-const warningJob = schedule.scheduleJob("55 2,5,8,11,14,17,20,23 * * *", () => {
+/* const warningJob = schedule.scheduleJob("55 2,5,8,11,14,17,20,23 * * *", () => {
 	doTheWarning();
-});
+}); */
 
 const job = schedule.scheduleJob("0 */3 * * *", () => {
 	doTriviaJob();
@@ -110,10 +110,15 @@ async function sendQuizz(chatId) {
 		let message;
 		const fileExtension = question.url.split(".").pop().toLowerCase();
 		if (["mp4", "mov", "avi", "mkv"].includes(fileExtension)) {
-			message = await bot.api.sendVideo(chatId, question.url);
+			message = bot.api.sendVideo(chatId, question.url).catch((err) => {
+				console.error(err);
+			});
 		} else if (["jpg", "jpeg", "png", "gif", "bmp"].includes(fileExtension)) {
-			message = await bot.api.sendPhoto(chatId, question.url);
+			message = bot.api.sendPhoto(chatId, question.url).catch((err) => {
+				console.error(err);
+			});
 		}
+
 		console.log("url", question.url);
 	}
 	const pollMsg = await bot.api.sendPoll(chatId, question.questionStr, question.options, {
