@@ -218,6 +218,10 @@ bot.command("nowarn", async (ctx) => {
 	}
 });
 
+/* bot.command("master", async (ctx) => {
+	ctx.reply("@tgramtgramtgram");
+});
+ */
 bot.start();
 bot.api.setMyCommands([
 	{ command: "warnme", description: "get warning for next trivia" },

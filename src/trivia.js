@@ -10,30 +10,46 @@ function sendRandomQuizz(chatId) {
 		const mongoCollection = db.collection("jeopardy");
 
 		const questionDoc = (
-			await mongoCollection.aggregate([/* { $match: { Question: { $regex: "href=", $options: "i" } } },  */ { $sample: { size: 1 } }]).toArray()
+			await mongoCollection.aggregate([/* { $match: { Question: { $regex: "kamelos", $options: "i" } } }, */ { $sample: { size: 1 } }]).toArray()
 		)[0];
 		try {
-			const response = await sendSimpleRequestToDeepSeek(
-				`You are a trivia expert AI. Your task is to enhance a trivia question for a quiz game. Given the following trivia question: "${questionDoc.Question}" in the category '${questionDoc.Category}' and its correct answer: "${questionDoc.Answer}", perform the following tasks:
-1. Generate three distinct, plausible, and contextually relevant incorrect answers. Ensure they are short, not overly similar to the correct answer, and MUST match the style, tone, and format of the correct answer (e.g., if the correct answer is "chilly (chili)", the incorrect answers should follow the same style, if the correct answer is like "Ceylon (or Sri Lanka)" the wrong answers should also imitate that with the parenthesis).
-2. Reformulate the question to make it clearer and easier to understand, without making the correct answer too obvious.
-3. Provide a fun fact or explanation (up to 200 characters) that will be shown when the user selects an incorrect answer.
+			const prompt = `You are a trivia expert AI creating engaging quiz questions. Given:
+			- Question: "${questionDoc.Question}"
+			- Category: '${questionDoc.Category}'
+			- Correct answer: "${questionDoc.Answer}"
 
-Respond with a JSON object in the following format:
-{
-  "IncorrectAnswers": ["answer1", "answer2", "answer3"],
-  "Explanation": "A short explanation or fun fact.",
-  "ReformulatedQuestion": "The reformulated question."
-}`,
-				"json_object"
-			);
+			Tasks:
+			1. Reformulate the question: Make it engaging, clear, appropriate difficulty, and concise (max 150 chars)
+				- If question reveals answer (even in different language), create a new question with same answer
+				- Ensure it works well in multiple-choice format
+
+			2. Generate three incorrect answers that:
+				- Match format, style, and length of correct answer
+				- Are plausible but clearly incorrect
+				- Follow any special formatting of correct answer
+
+			3. Create brief explanation (max 200 chars):
+				- Why correct answer is right
+				- Include interesting fact
+				- Be educational and engaging
+
+			Output JSON only:
+			{
+				 "Reasoning": "Your summarized reasoning behind the reformulated question and answer choices",
+				 "IncorrectAnswers": ["answer1", "answer2", "answer3"],
+				 "Explanation": "Your concise explanation",
+				 "ReformulatedQuestion": "Your reformulated question"
+			}
+				 
+			Make sure the JSON is valid and well-formed. Do not include any other text or formatting.`;
+
+			const response = await sendSimpleRequestToDeepSeek(prompt, "json_object");
 
 			const parsedText = JSON.parse(response);
 			const explanation = parsedText.Explanation.trim().slice(0, 200);
 			const extractedURLFromQuestion = (questionDoc.Question.match(/href="([^"]+)"/) || [])[1];
 			const answers = parsedText.IncorrectAnswers.map((answer) => answer.replace(/^"|"$/g, "").trim());
 			questionDoc.IncorrectAnswers = answers;
-
 			const question = {
 				questionStr: questionDoc.Category + ": " + parsedText.ReformulatedQuestion.slice(0, 300),
 				answer: questionDoc.Answer.replace(/^"|"$/g, "").trim(),
