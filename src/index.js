@@ -40,17 +40,22 @@ async function doTheWarning(chatId = null) {
 	}
 }
 
-async function doTriviaJob(chatId = null) {
-	const db = await MongoDB.getInstance().connect();
-	const chats = await db.collection("chats").find({}).toArray();
-	for (const chat of chats) {
-		if (chatId && chat.chatId !== chatId) continue;
-		sendQuizz(chat.chatId);
-		bot.api.deleteMessage(chat.chatId, chat.warningMessageID).catch((err) => {});
-		/* setTimeout(() => {
+async function doTriviaJob(chatId = null, waitingMessage = null) {
+	return new Promise(async (resolve, reject) => {
+		const db = await MongoDB.getInstance().connect();
+		const chats = await db.collection("chats").find({}).toArray();
+		for (const chat of chats) {
+			if (chatId && chat.chatId !== chatId) continue;
+			await sendQuizz(chat.chatId);
+			//bot.api.deleteMessage(chat.chatId, chat.warningMessageID).catch((err) => {});
+			await bot.api.deleteMessage(chat.chatId, waitingMessage.message_id).catch((err) => {});
+
+			/* setTimeout(() => {
 			showLeaderboard(chat.chatId);
 		}, timeToAnswer * 1000); */
-	}
+		}
+		resolve();
+	});
 }
 
 bot.command("warning", async (ctx) => {
@@ -60,8 +65,35 @@ bot.command("warning", async (ctx) => {
 });
 
 bot.command("trivia", async (ctx) => {
-	if (ctx.from.id == process.env.ADMIN_ID) {
-		doTriviaJob(ctx.chat.id);
+	const allowedUsers = process.env.ALLOWED_USERS.split(" ");
+	const isBusy = myCache.get(ctx.chat.id);
+	if (!isBusy) {
+		if (allowedUsers.includes(ctx.from.id.toString())) {
+			myCache.set(ctx.chat.id, true);
+			const waitingMessage = await ctx.reply("Wait a moment, I'm fetching a trivia question for you! Blame deepseek for the delay.");
+			doTriviaJob(ctx.chat.id, waitingMessage).then(() => {
+				myCache.del(ctx.chat.id);
+			});
+		} else {
+			const lastrejection = myCache.get(ctx.chat.id + "-rejection-");
+			if (lastrejection) {
+				const timeSinceLastRejection = Date.now() - lastrejection;
+				if (Date.now() - lastrejection < 10000) {
+					return;
+				}
+			}
+
+			myCache.set(ctx.chat.id + "-rejection-", Date.now());
+			const rejectionMessage = await ctx.replyWithPhoto(process.env.NO_RESPONSE_LINK);
+			setTimeout(() => {
+				bot.api.deleteMessage(ctx.chat.id, rejectionMessage.message_id).catch((err) => {});
+			}, 2000);
+		}
+	} else {
+		const rejectionMessage = await ctx.reply("I'm busy getting a trivia question for someone else, please wait!");
+		setTimeout(() => {
+			bot.api.deleteMessage(ctx.chat.id, rejectionMessage.message_id).catch((err) => {});
+		}, 1500);
 	}
 });
 
@@ -93,45 +125,51 @@ function fetchURLContent(url) {
 }
 
 async function sendQuizz(chatId) {
-	let question;
-	let attempts = 0;
-	const maxAttempts = 3;
+	return new Promise(async (resolve, reject) => {
+		let question;
+		let attempts = 0;
+		const maxAttempts = 3;
 
-	while (attempts < maxAttempts) {
+		while (attempts < maxAttempts) {
+			try {
+				question = await sendRandomQuizz(chatId);
+				if (question) break;
+			} catch (error) {
+				console.error(`Attempt ${attempts + 1} failed:`, error);
+			}
+			attempts++;
+		}
 		try {
-			question = await sendRandomQuizz(chatId);
-			if (question) break;
-		} catch (error) {
-			console.error(`Attempt ${attempts + 1} failed:`, error);
-		}
-		attempts++;
-	}
-	if (question.url) {
-		let message;
-		const fileExtension = question.url.split(".").pop().toLowerCase();
-		if (["mp4", "mov", "avi", "mkv"].includes(fileExtension)) {
-			message = bot.api.sendVideo(chatId, question.url).catch((err) => {
-				console.error(err);
-			});
-		} else if (["jpg", "jpeg", "png", "gif", "bmp"].includes(fileExtension)) {
-			message = bot.api.sendPhoto(chatId, question.url).catch((err) => {
-				console.error(err);
-			});
-		}
+			if (question.url) {
+				let message;
+				const fileExtension = question.url.split(".").pop().toLowerCase();
+				if (["mp4", "mov", "avi", "mkv"].includes(fileExtension)) {
+					message = bot.api.sendVideo(chatId, question.url).catch((err) => {
+						console.error(err);
+					});
+				} else if (["jpg", "jpeg", "png", "gif", "bmp"].includes(fileExtension)) {
+					message = bot.api.sendPhoto(chatId, question.url).catch((err) => {
+						console.error(err);
+					});
+				}
 
-		console.log("url", question.url);
-	}
-	const pollMsg = await bot.api.sendPoll(chatId, question.questionStr, question.options, {
-		type: "quiz",
-		explanation: question.hint,
-		correct_option_id: question.options.findIndex((option) => option === question.answer),
-		question_parse_mode: "HTML",
-		//open_period: timeToAnswer,
-		is_anonymous: false,
+				console.log("url", question.url);
+			}
+			const pollMsg = await bot.api.sendPoll(chatId, question.questionStr, question.options, {
+				type: "quiz",
+				explanation: question.hint,
+				correct_option_id: question.options.findIndex((option) => option === question.answer),
+				question_parse_mode: "HTML",
+				//open_period: timeToAnswer,
+				is_anonymous: false,
+			});
+			const db = await MongoDB.getInstance().connect();
+			await db.collection("polls").insertOne({ ...pollMsg.poll, chatId, date: new Date() });
+			resolve(pollMsg);
+		} catch (error) {
+			reject(error);
+		}
 	});
-	const db = await MongoDB.getInstance().connect();
-	await db.collection("polls").insertOne({ ...pollMsg.poll, chatId, date: new Date() });
-	return;
 }
 
 bot.on("poll_answer", async (ctx) => {
