@@ -45,10 +45,12 @@ async function doTriviaJob(chatId = null, waitingMessage = null) {
 		const db = await MongoDB.getInstance().connect();
 		const chats = await db.collection("chats").find({}).toArray();
 		for (const chat of chats) {
-			if (chatId && chat.chatId !== chatId) continue;
+			if (chatId && chat.chatId !== chatId) {
+				await bot.api.deleteMessage(chat.chatId, waitingMessage.message_id).catch((err) => {});
+				continue;
+			}
 			await sendQuizz(chat.chatId);
 			//bot.api.deleteMessage(chat.chatId, chat.warningMessageID).catch((err) => {});
-			await bot.api.deleteMessage(chat.chatId, waitingMessage.message_id).catch((err) => {});
 
 			/* setTimeout(() => {
 			showLeaderboard(chat.chatId);
@@ -87,7 +89,7 @@ bot.command("trivia", async (ctx) => {
 			const rejectionMessage = await ctx.replyWithPhoto(process.env.NO_RESPONSE_LINK);
 			setTimeout(() => {
 				bot.api.deleteMessage(ctx.chat.id, rejectionMessage.message_id).catch((err) => {});
-			}, 2000);
+			}, 1500);
 		}
 	} else {
 		const rejectionMessage = await ctx.reply("I'm busy getting a trivia question for someone else, please wait!");
