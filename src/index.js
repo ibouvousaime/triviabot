@@ -97,10 +97,7 @@ bot.command("trivia", async (ctx) => {
 			}, 1500);
 		}
 	} else {
-		const rejectionMessage = await ctx.reply("I'm busy getting a trivia question, please wait!");
-		setTimeout(() => {
-			bot.api.deleteMessage(ctx.chat.id, rejectionMessage.message_id).catch((err) => {});
-		}, 1500);
+		ctx.react("😐");
 	}
 });
 
@@ -179,10 +176,6 @@ async function sendQuizz(chatId) {
 	});
 }
 
-bot.on("message_reaction", async (ctx) => {
-	bot.sendMessage(ctx.chat.id, "Thanks for the reaction! I appreciate it! ❤️");
-});
-
 bot.on("poll_answer", async (ctx) => {
 	const db = await MongoDB.getInstance().connect();
 
@@ -227,6 +220,35 @@ async function showLeaderboard(chatId) {
 	}
 	bot.api.sendMessage(chatId, message, { parse_mode: "HTML" });
 }
+
+function getLeaderboardByRatio(chatId) {
+	return new Promise(async (resolve, reject) => {
+		const db = await MongoDB.getInstance().connect();
+		const leaderboard = await db
+			.collection("pollScores")
+			.aggregate([
+				{ $match: { chatId } },
+				{ $addFields: { ratio: { $divide: ["$correctAnswers", { $add: ["$correctAnswers", "$wrongAnswers"] }] } } },
+				{ $addFields: { totalAnswered: { $add: ["$correctAnswers", "$wrongAnswers"] } } },
+				{ $sort: { ratio: -1 } },
+				{ $limit: 10 },
+			])
+			.toArray();
+		resolve(leaderboard);
+		let message = `🏆 <b>Leaderboard</b> 🏆\n By ratio \n\n`;
+		for (let i = 0; i < leaderboard.length; i++) {
+			const user = leaderboard[i];
+			message +=
+				`<b>${i + 1}.</b> ${user.first_name} ${user.last_name || ""} ` +
+				`(Ratio: ${Number.isFinite(user.ratio) ? user.ratio.toFixed(2) : 0} | total answered: ${user.totalAnswered || 0})\n`;
+		}
+		bot.api.sendMessage(chatId, message, { parse_mode: "HTML" });
+	});
+}
+
+bot.command("ratio", async (ctx) => {
+	getLeaderboardByRatio(ctx.chat.id);
+});
 
 bot.command("leaderboard", async (ctx) => {
 	showLeaderboard(ctx.chat.id);
@@ -274,13 +296,10 @@ bot.command("nowarn", async (ctx) => {
  */
 
 bot.start({ allowed_updates: API_CONSTANTS.ALL_UPDATE_TYPES });
-bot.reaction(["👍", "👎"], (ctx) => {
-	console.log(ctx);
-	ctx.reply("Noted");
-});
 
 bot.api.setMyCommands([
 	{ command: "warnme", description: "get warning for next trivia" },
 	{ command: "nowarn", description: "no longer get warning" },
 	{ command: "leaderboard", description: "show leaderboard" },
+	{ command: "ratio", description: "show leaderboard by ratio" },
 ]);
