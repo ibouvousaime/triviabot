@@ -7,10 +7,10 @@ function sendRandomQuizz(chatId) {
 		const dbInstance = MongoDB.getInstance();
 		await dbInstance.connect("messages");
 		const db = dbInstance.getDb();
-		const mongoCollection = db.collection("trivia");
+		const mongoCollection = db.collection(Math.random() > 0.5 ? "trivia" : "jeopardy");
 
 		const questionDoc = (
-			await mongoCollection.aggregate([/* { $match: { Category: { $regex: "mythology", $options: "i" } } }, */ { $sample: { size: 1 } }]).toArray()
+			await mongoCollection.aggregate([/* { $match: { Question: { $regex: "The Big Smoke", $options: "i" } } },  */ { $sample: { size: 1 } }]).toArray()
 		)[0];
 		try {
 			const prompt = `You are a trivia expert AI creating engaging quiz questions. Given:

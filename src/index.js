@@ -1,7 +1,7 @@
 const dotenv = require("dotenv");
 dotenv.config("../.env");
 
-const { Bot } = require("grammy");
+const { Bot, API_CONSTANTS } = require("grammy");
 const { sendRandomQuizz } = require("./trivia");
 const MongoDB = require("./mongo");
 const NodeCache = require("node-cache");
@@ -46,10 +46,13 @@ async function doTriviaJob(chatId = null, waitingMessage = null) {
 		const chats = await db.collection("chats").find({}).toArray();
 		for (const chat of chats) {
 			if (chatId && chat.chatId !== chatId) {
-				await bot.api.deleteMessage(chat.chatId, waitingMessage.message_id).catch((err) => {});
 				continue;
 			}
+
 			await sendQuizz(chat.chatId);
+			if (waitingMessage) {
+				await bot.api.deleteMessage(chat.chatId, waitingMessage.message_id).catch((err) => {});
+			}
 			//bot.api.deleteMessage(chat.chatId, chat.warningMessageID).catch((err) => {});
 
 			/* setTimeout(() => {
@@ -72,12 +75,14 @@ bot.command("trivia", async (ctx) => {
 	if (!isBusy) {
 		if (allowedUsers.includes(ctx.from.id.toString())) {
 			myCache.set(ctx.chat.id, true);
-			const waitingMessage = await ctx.reply("Wait a moment, I'm fetching a trivia question for you! Blame deepseek for the delay.");
-			doTriviaJob(ctx.chat.id, waitingMessage).then(() => {
+			ctx.react("👍");
+			//const waitingMessage = await ctx.reply("Just a sec~! I'm grabbing a trivia question for you~!\nIt's DeepSeek's fault I'm slow... hmph!");
+			doTriviaJob(ctx.chat.id).then(() => {
 				myCache.del(ctx.chat.id);
 			});
 		} else {
 			const lastrejection = myCache.get(ctx.chat.id + "-rejection-");
+			ctx.react("👎");
 			if (lastrejection) {
 				const timeSinceLastRejection = Date.now() - lastrejection;
 				if (Date.now() - lastrejection < 10000) {
@@ -92,7 +97,7 @@ bot.command("trivia", async (ctx) => {
 			}, 1500);
 		}
 	} else {
-		const rejectionMessage = await ctx.reply("I'm busy getting a trivia question for someone else, please wait!");
+		const rejectionMessage = await ctx.reply("I'm busy getting a trivia question, please wait!");
 		setTimeout(() => {
 			bot.api.deleteMessage(ctx.chat.id, rejectionMessage.message_id).catch((err) => {});
 		}, 1500);
@@ -174,6 +179,10 @@ async function sendQuizz(chatId) {
 	});
 }
 
+bot.on("message_reaction", async (ctx) => {
+	bot.sendMessage(ctx.chat.id, "Thanks for the reaction! I appreciate it! ❤️");
+});
+
 bot.on("poll_answer", async (ctx) => {
 	const db = await MongoDB.getInstance().connect();
 
@@ -202,6 +211,7 @@ async function showLeaderboard(chatId) {
 		.aggregate([
 			{ $match: { chatId } },
 			{ $addFields: { deduction: { $floor: { $divide: [{ $add: ["$correctAnswers", "$wrongAnswers"] }, 15] } } } },
+			{ $addFields: { ratio: { $divide: ["$correctAnswers", { $add: ["$correctAnswers", "$wrongAnswers"] }] } } },
 			{ $addFields: { score: { $subtract: ["$correctAnswers", "$deduction"] } } },
 			{ $sort: { score: -1 } },
 			{ $limit: 10 },
@@ -213,7 +223,7 @@ async function showLeaderboard(chatId) {
 		const user = leaderboard[i];
 		message +=
 			`<b>${i + 1}.</b> ${user.first_name} ${user.last_name || ""} — <b>Score:</b> ${user.score || 0} ` +
-			`(Correct: ${user.correctAnswers || 0} | Accuracy penalty: ${user.deduction || 0})\n`;
+			`(Correct: ${user.correctAnswers || 0} | Accuracy penalty: ${user.deduction || 0} | Ratio: ${Number.isFinite(user.ratio) ? user.ratio.toFixed(2) : 0})\n`;
 	}
 	bot.api.sendMessage(chatId, message, { parse_mode: "HTML" });
 }
@@ -262,7 +272,13 @@ bot.command("nowarn", async (ctx) => {
 	ctx.reply("@tgramtgramtgram");
 });
  */
-bot.start();
+
+bot.start({ allowed_updates: API_CONSTANTS.ALL_UPDATE_TYPES });
+bot.reaction(["👍", "👎"], (ctx) => {
+	console.log(ctx);
+	ctx.reply("Noted");
+});
+
 bot.api.setMyCommands([
 	{ command: "warnme", description: "get warning for next trivia" },
 	{ command: "nowarn", description: "no longer get warning" },
