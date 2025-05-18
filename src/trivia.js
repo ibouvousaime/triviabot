@@ -10,7 +10,9 @@ function sendRandomQuizz(chatId) {
 		const mongoCollection = db.collection(Math.random() > 0.5 ? "trivia" : "jeopardy");
 
 		const questionDoc = (
-			await mongoCollection.aggregate([/* { $match: { Question: { $regex: "The Big Smoke", $options: "i" } } },  */ { $sample: { size: 1 } }]).toArray()
+			await mongoCollection
+				.aggregate([/* { $match: { Category: { $regex: "prime", $options: "i" }, Answer: { $regex: "911", $options: "i" } } }, */ { $sample: { size: 1 } }])
+				.toArray()
 		)[0];
 		try {
 			const prompt = `You are a trivia expert AI creating engaging quiz questions. Given:
@@ -39,12 +41,12 @@ function sendRandomQuizz(chatId) {
 				 "IncorrectAnswers": ["answer1", "answer2", "answer3"],
 				 "Explanation": "Your concise explanation",
 				 "Answer": "The correct answer (in the same format/style as the wrong answers)",
-				 "ReformulatedQuestion": "Your reformulated question"
+				 "Question: "The same exact question minus anything that could make it easy or reveal the answer."
 			}
 				 
 			Make sure the JSON is valid and well-formed. Do not include any other text or formatting.`;
 
-			const response = await sendSimpleRequestToDeepSeek(prompt, "json_object");
+			const { response, reasoning } = await sendSimpleRequestToClaude(prompt);
 
 			const parsedText = JSON.parse(response);
 			const explanation = parsedText.Explanation.trim().slice(0, 200);
@@ -52,11 +54,12 @@ function sendRandomQuizz(chatId) {
 			const answers = parsedText.IncorrectAnswers.map((answer) => answer.replace(/^"|"$/g, "").trim());
 			questionDoc.IncorrectAnswers = answers;
 			const question = {
-				questionStr: (questionDoc.Category ? questionDoc.Category + ": " : "") + parsedText.ReformulatedQuestion.slice(0, 300),
+				questionStr: (questionDoc.Category ? questionDoc.Category + ": " : "") + parsedText.Question.slice(0, 300),
 				answer: parsedText.Answer.replace(/^"|"$/g, "").trim(),
 				hint: explanation,
 				url: extractedURLFromQuestion,
 				options: [parsedText.Answer, ...questionDoc.IncorrectAnswers],
+				reasoning: parsedText.Reasoning,
 			};
 
 			question.options = question.options.sort(() => Math.random() - 0.5).map((option) => option.replace(/^"|"$/g, "").trim());

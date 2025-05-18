@@ -144,6 +144,7 @@ async function sendQuizz(chatId) {
 			attempts++;
 		}
 		try {
+			console.log("Question:", question);
 			if (question.url) {
 				let message;
 				const fileExtension = question.url.split(".").pop().toLowerCase();
@@ -156,8 +157,6 @@ async function sendQuizz(chatId) {
 						console.error(err);
 					});
 				}
-
-				console.log("url", question.url);
 			}
 			const pollMsg = await bot.api.sendPoll(chatId, question.questionStr, question.options, {
 				type: "quiz",
@@ -168,7 +167,7 @@ async function sendQuizz(chatId) {
 				is_anonymous: false,
 			});
 			const db = await MongoDB.getInstance().connect();
-			await db.collection("polls").insertOne({ ...pollMsg.poll, chatId, date: new Date() });
+			await db.collection("polls").insertOne({ ...pollMsg.poll, reasoning: question.reasoning, chatId, date: new Date() });
 			resolve(pollMsg);
 		} catch (error) {
 			reject(error);
@@ -197,7 +196,7 @@ bot.on("poll_answer", async (ctx) => {
 		});
 });
 
-async function showLeaderboard(chatId) {
+async function showLeaderboard(chatId, limited = true) {
 	const db = await MongoDB.getInstance().connect();
 	const leaderboard = await db
 		.collection("pollScores")
@@ -207,10 +206,9 @@ async function showLeaderboard(chatId) {
 			{ $addFields: { ratio: { $divide: ["$correctAnswers", { $add: ["$correctAnswers", "$wrongAnswers"] }] } } },
 			{ $addFields: { score: { $subtract: ["$correctAnswers", "$deduction"] } } },
 			{ $sort: { score: -1 } },
-			{ $limit: 10 },
+			...(limited ? [{ $limit: 10 }] : []),
 		])
 		.toArray();
-	console.log(leaderboard);
 	let message = `🏆 <b>Leaderboard</b> 🏆\n <i>1 point per correct answer (a point deduced for every 15 answers) </i> \n\n`;
 	for (let i = 0; i < leaderboard.length; i++) {
 		const user = leaderboard[i];
@@ -221,73 +219,89 @@ async function showLeaderboard(chatId) {
 	bot.api.sendMessage(chatId, message, { parse_mode: "HTML" });
 }
 
-function getLeaderboardByRatio(chatId) {
-	return new Promise(async (resolve, reject) => {
-		const db = await MongoDB.getInstance().connect();
-		const leaderboard = await db
-			.collection("pollScores")
-			.aggregate([
-				{ $match: { chatId } },
-				{ $addFields: { ratio: { $divide: ["$correctAnswers", { $add: ["$correctAnswers", "$wrongAnswers"] }] } } },
-				{ $addFields: { totalAnswered: { $add: ["$correctAnswers", "$wrongAnswers"] } } },
-				{ $sort: { ratio: -1 } },
-				{ $limit: 10 },
-			])
-			.toArray();
-		resolve(leaderboard);
-		let message = `🏆 <b>Leaderboard</b> 🏆\n By ratio \n\n`;
-		for (let i = 0; i < leaderboard.length; i++) {
-			const user = leaderboard[i];
-			message +=
-				`<b>${i + 1}.</b> ${user.first_name} ${user.last_name || ""} ` +
-				`(Ratio: ${Number.isFinite(user.ratio) ? user.ratio.toFixed(2) : 0} | total answered: ${user.totalAnswered || 0})\n`;
-		}
-		bot.api.sendMessage(chatId, message, { parse_mode: "HTML" });
-	});
+async function showLeaderboardRatio(chatId, limited = true) {
+	const db = await MongoDB.getInstance().connect();
+	const leaderboard = await db
+		.collection("pollScores")
+		.aggregate([
+			{ $match: { chatId } },
+			{
+				$addFields: {
+					totalAnswers: { $add: ["$correctAnswers", "$wrongAnswers"] },
+				},
+			},
+			{
+				$addFields: {
+					accuracy: {
+						$cond: [{ $eq: ["$totalAnswers", 0] }, 0, { $divide: ["$correctAnswers", "$totalAnswers"] }],
+					},
+				},
+			},
+			{
+				$addFields: {
+					score: { $multiply: ["$correctAnswers", "$accuracy"] },
+				},
+			},
+			{ $sort: { score: -1 } },
+			...(limited ? [{ $limit: 10 }] : []),
+		])
+		.toArray();
+
+	let message = `🏆 <b>Leaderboard</b> 🏆\n <i>Score = correct × accuracy</i> \n\n`;
+	for (let i = 0; i < leaderboard.length; i++) {
+		const user = leaderboard[i];
+		message +=
+			`<b>${i + 1}.</b> ${user.first_name} ${user.last_name || ""} — <b>Score:</b> ${Math.round(user.score || 0)} ` +
+			`(Correct: ${user.correctAnswers || 0} | Accuracy: ${Math.round(user.accuracy * 100 || 0)}%)\n`;
+	}
+	message = `<blockquote expandable>${message}\n\n---</blockquote>`;
+	bot.api.sendMessage(chatId, message, { parse_mode: "HTML" });
 }
 
-bot.command("ratio", async (ctx) => {
-	getLeaderboardByRatio(ctx.chat.id);
-});
-
 bot.command("leaderboard", async (ctx) => {
-	showLeaderboard(ctx.chat.id);
+	const lastLeaderboardPostTime = myCache.get(ctx.chat.id + "-leaderboard");
+	if (lastLeaderboardPostTime && Date.now() - lastLeaderboardPostTime < 60000) {
+		ctx.react("👎");
+		return;
+	}
+	myCache.set(ctx.chat.id + "-leaderboard", Date.now());
+	showLeaderboardRatio(ctx.chat.id, false);
 });
 
-bot.command("warnme", async (ctx) => {
-	const chatId = ctx.chat.id;
+bot.command("mystats", async (ctx) => {
 	const db = await MongoDB.getInstance().connect();
-	if (ctx.chat.type === "private") {
-		ctx.reply("Only in group chats, my friend! Please use it in a group chat.");
-		return;
-	} else if (ctx.chat.type === "group" || ctx.chat.type === "supergroup") {
-		const chat = await db.collection("chats").findOne({ chatId });
-		if (chat) {
-			chat.users = chat.users || [];
-		}
-		if (!chat.users.includes(ctx.from.username || ctx.from.first_name)) {
-			await db.collection("chats").updateOne({ chatId }, { $push: { users: ctx.from.username || ctx.from.first_name } });
-			ctx.reply("I'll @ you five minutes before the next quiz starts!");
-		}
-	}
-});
-
-bot.command("nowarn", async (ctx) => {
 	const chatId = ctx.chat.id;
-	const db = await MongoDB.getInstance().connect();
-	if (ctx.chat.type === "private") {
-		ctx.reply("Only in group chats, my friend! Please use it in a group chat.");
-		return;
-	} else if (ctx.chat.type === "group" || ctx.chat.type === "supergroup") {
-		const chat = await db.collection("chats").findOne({ chatId });
-		if (chat) {
-			chat.users = chat.users || [];
-		}
-		if (chat.users.includes(ctx.from.username || ctx.from.first_name)) {
-			await db.collection("chats").updateOne({ chatId }, { $pull: { users: ctx.from.username || ctx.from.first_name } });
-			ctx.reply("No more warnings for you, warm!");
-		}
-	}
+	const stats = await db
+		.collection("pollScores")
+		.aggregate([
+			{ $match: { chatId, userId: ctx.message.from.id } },
+			{
+				$addFields: {
+					totalAnswers: { $add: ["$correctAnswers", "$wrongAnswers"] },
+				},
+			},
+			{
+				$addFields: {
+					accuracy: {
+						$cond: [{ $eq: ["$totalAnswers", 0] }, 0, { $divide: ["$correctAnswers", "$totalAnswers"] }],
+					},
+				},
+			},
+			{
+				$addFields: {
+					score: { $multiply: ["$correctAnswers", "$accuracy"] },
+				},
+			},
+		])
+		.toArray();
+	const user = stats[0];
+	const message =
+		`<u>Stats for ${[ctx.message.from.first_name, ctx.message.from.last_name].join(" ").trim()}</u>\n` +
+		`Correct: ${user.correctAnswers || 0}\n` +
+		`Wrong: ${user.wrongAnswers || 0}\n` +
+		`Score: ${Math.round(user.score || 0)}\n` +
+		`Accuracy : ${Math.round((user.accuracy || 0) * 100)}%`;
+	ctx.reply(message, { parse_mode: "HTML" });
 });
 
 /* bot.command("master", async (ctx) => {
@@ -298,8 +312,7 @@ bot.command("nowarn", async (ctx) => {
 bot.start({ allowed_updates: API_CONSTANTS.ALL_UPDATE_TYPES });
 
 bot.api.setMyCommands([
-	{ command: "warnme", description: "get warning for next trivia" },
-	{ command: "nowarn", description: "no longer get warning" },
+	{ command: "mystats", description: "personal stats" },
 	{ command: "leaderboard", description: "show leaderboard" },
-	{ command: "ratio", description: "show leaderboard by ratio" },
+	{ command: "fullleaderboard", description: "show leaderboard without the limits" },
 ]);
